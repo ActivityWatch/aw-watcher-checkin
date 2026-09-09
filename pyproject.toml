@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 license = "MIT"
 keywords = []
 authors = [{ name = "Jeremiah England", email = "englandtuning@gmail.com" }]
+maintainers = [{ name = "ActivityWatch", email = "contact@activitywatch.net" }]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
@@ -23,6 +24,7 @@ dependencies = ["aw-client", "appdirs"]
 aw-watcher-ask-away = "aw_watcher_ask_away.__main__:main"
 
 [project.urls]
+Original = "https://github.com/Jeremiah-England/aw-watcher-ask-away"
 Documentation = "https://github.com/Jeremiah-England/aw-watcher-ask-away#readme"
 Issues = "https://github.com/Jeremiah-England/aw-watcher-ask-away/issues"
 Source = "https://github.com/Jeremiah-England/aw-watcher-ask-away"

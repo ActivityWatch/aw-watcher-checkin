@@ -1,5 +1,15 @@
 # AW Watcher Ask Away
 
+> **Adopted into the ActivityWatch organization (2026-09-08).**
+> This watcher was created and developed by [Jeremiah England](https://github.com/Jeremiah-England)
+> at [Jeremiah-England/aw-watcher-ask-away](https://github.com/Jeremiah-England/aw-watcher-ask-away)
+> and published to [PyPI](https://pypi.org/project/aw-watcher-ask-away/) (v0.0.6).
+> The full commit history is preserved here. It is being extended as **`aw-watcher-checkin`**
+> — boundary-triggered check-ins (return from AFK, sustained context switch, long block)
+> with short rating prompts — while keeping its AFK-return core and event shape.
+> See *Origin and attribution* at the bottom. Thank you, Jeremiah.
+
+
 [![PyPI - Version](https://img.shields.io/pypi/v/aw-watcher-ask-away.svg)](https://pypi.org/project/aw-watcher-ask-away)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/aw-watcher-ask-away.svg)](https://pypi.org/project/aw-watcher-ask-away)
 
@@ -37,3 +47,16 @@ I have never use it before and I'm probably doing some things wrong there.
 ## License
 
 `aw-watcher-ask-away` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
+
+## Origin and attribution
+
+- **Original author:** Jeremiah England — https://github.com/Jeremiah-England/aw-watcher-ask-away
+- **Original package:** https://pypi.org/project/aw-watcher-ask-away/ (0.0.2 – 0.0.6, 2023)
+- **License:** MIT, © 2023 Jeremiah England — retained verbatim in `LICENSE`.
+- **Adopted:** 2026-09-08 into the ActivityWatch organization, with full git history.
+- **Why this one:** its `core.py` already handles the hard parts of AFK-return prompting —
+  gap detection over squashed not-AFK events (so suspend/power-off count as away),
+  overlap-ratio de-duplication against aw-server timestamp jitter, zero-length event
+  filtering, and writing the rating as the block itself. Extending it beats rewriting it.
+- **Related:** [bcbernardo/aw-watcher-ask](https://github.com/bcbernardo/aw-watcher-ask)
+  — schedule-triggered ESM prompts via Zenity; a sibling approach to the same idea.
