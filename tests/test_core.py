@@ -113,3 +113,36 @@ def test_double_ask_suspend_afk():
     expected_end = datetime.datetime.fromisoformat("2023-10-13T08:47:38.792000-04:00")
     assert second_unseen[0].timestamp == expected_start
     assert second_unseen[0].duration.total_seconds() == (expected_end - expected_start).total_seconds()
+
+
+def test_unanswered_boundary_is_recorded_unlabeled_and_not_reasked():
+    """A timed-out dialog keeps the boundary as unlabeled data and is not asked again.
+
+    Regression guard for the wedge observed on Bob's agent desktop 2026-09-08:
+    the dialog was modal with no expiry, so an unanswered prompt blocked the
+    watcher's polling loop for two days and no boundary was ever recorded.
+    """
+    events = [_tuple_to_event(tup) for tup in [(0, 60, NOT_AFK), (60, 600, AFK), (660, 60, NOT_AFK)]]
+
+    state = AWAskAwayState([])
+    unseen = list(state.get_unseen_afk_events(events, INF, 3 * 60))
+    assert len(unseen) == 1
+
+    # What __main__ does when the dialog times out unanswered.
+    state.add_event(unseen[0], "", unlabeled=True)
+    assert unseen[0].data["message"] == ""
+    assert unseen[0].data["unlabeled"] is True
+
+    # The boundary is not offered again, so the user is not re-asked the same gap.
+    assert list(state.get_unseen_afk_events(events, INF, 3 * 60)) == []
+
+
+def test_answered_event_is_not_marked_unlabeled():
+    events = [_tuple_to_event(tup) for tup in [(0, 60, NOT_AFK), (60, 600, AFK), (660, 60, NOT_AFK)]]
+
+    state = AWAskAwayState([])
+    unseen = list(state.get_unseen_afk_events(events, INF, 3 * 60))
+    state.add_event(unseen[0], "Writing a regression test")
+
+    assert unseen[0].data["message"] == "Writing a regression test"
+    assert "unlabeled" not in unseen[0].data

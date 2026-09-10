@@ -175,10 +175,12 @@ abbreviations = _AbbreviationStore()
 # TODO: This widget pops up off-center when using multiple screes on Linux, possibly other platforms.
 # See https://stackoverflow.com/questions/30312875/tkinter-winfo-screenwidth-when-used-with-dual-monitors/57866046#57866046
 class AWAskAwayDialog(simpledialog.Dialog):
-    def __init__(self, title: str, prompt: str, history: list[str]) -> None:
+    def __init__(self, title: str, prompt: str, history: list[str], timeout_seconds: float = 0.0) -> None:
         self.prompt = prompt
         self.history = history
         self.history_index = len(history)
+        self.timeout_seconds = timeout_seconds
+        self._timeout_id: str | None = None
         super().__init__(root, title)
 
     # @override (when we get to 3.12)
@@ -232,6 +234,60 @@ class AWAskAwayDialog(simpledialog.Dialog):
         self.bind("<Control-comma>", self.open_config)
 
         return self.entry
+
+    def _schedule_timeout(self):
+        """Arm the auto-dismiss timer once."""
+        if self.timeout_seconds > 0 and self._timeout_id is None:
+            self._timeout_id = self.after(int(self.timeout_seconds * 1000), self._timeout)
+
+    # @override (when we get to 3.12)
+    def wait_visibility(self, window=None):
+        """Arm the auto-dismiss timer, and skip waiting for the window to map.
+
+        `simpledialog.Dialog.__init__` blocks in `wait_visibility()` before it
+        ever enters its event loop. This dialog is transient on a withdrawn root,
+        and some window managers (i3) then never map it — so that wait never
+        returns and the watcher is wedged before the timer could be armed
+        (observed on Bob's agent desktop 2026-09-08: 48 h with no polling).
+        Not waiting is safe: the dialog still appears, and `grab_set` follows.
+        """
+        self._schedule_timeout()
+        if self.timeout_seconds > 0:
+            return
+        super().wait_visibility(window)
+
+    # @override (when we get to 3.12)
+    def wait_window(self, window=None):
+        """Block until answered or dismissed — auto-dismissing after the timeout."""
+        self._schedule_timeout()
+        super().wait_window(window)
+
+    # @override (when we get to 3.12)
+    def destroy(self):
+        """Cancel any pending auto-dismiss timer before tearing the dialog down.
+
+        Tk `after` timers are interpreter-level and outlive the widget, so an
+        answered/dismissed dialog would otherwise get a second `_timeout()` call
+        on a destroyed widget.
+        """
+        if self._timeout_id is not None:
+            self.after_cancel(self._timeout_id)
+            self._timeout_id = None
+        super().destroy()
+
+    def _timeout(self):
+        """Close the dialog unanswered.
+
+        The result stays None, which the caller records as an unlabeled boundary.
+        Deliberately skips cancel()'s 60 s sleep: the loop must resume polling.
+        """
+        self._timeout_id = None
+        if not self.winfo_exists():
+            return
+        logger.debug("Check-in dialog timed out after %.0f s unanswered.", self.timeout_seconds)
+        self.result = None
+        self.withdraw()
+        self.destroy()
 
     def save_new_abbreviation(self, event=None, *, long: bool = False):  # noqa: ARG002
         if self.entry.selection_present():
@@ -361,8 +417,8 @@ class AWAskAwayDialog(simpledialog.Dialog):
         box.pack()
 
 
-def ask_string(title: str, prompt: str, history: list[str]):
-    d = AWAskAwayDialog(title, prompt, history)
+def ask_string(title: str, prompt: str, history: list[str], timeout_seconds: float = 0.0):
+    d = AWAskAwayDialog(title, prompt, history, timeout_seconds=timeout_seconds)
     return d.result
 
 

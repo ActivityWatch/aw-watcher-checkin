@@ -20,14 +20,16 @@ from aw_watcher_ask_away.core import (
 )
 
 
-def prompt(event: aw_core.Event, recent_events: Iterable[aw_core.Event]):
+def prompt(event: aw_core.Event, recent_events: Iterable[aw_core.Event], timeout_seconds: float = 0.0):
     # TODO: Allow for customizing the prompt from the prompt interface.
     start_time_str = event.timestamp.astimezone(LOCAL_TIMEZONE).strftime("%I:%M")
     end_time_str = (event.timestamp + event.duration).astimezone(LOCAL_TIMEZONE).strftime("%I:%M")
     prompt = f"What were you doing from {start_time_str} - {end_time_str} ({event.duration.seconds / 60:.1f} minutes)?"
     title = "AFK Checkin"
 
-    return aw_dialog.ask_string(title, prompt, [event.data[DATA_KEY] for event in recent_events])
+    return aw_dialog.ask_string(
+        title, prompt, [event.data[DATA_KEY] for event in recent_events], timeout_seconds=timeout_seconds
+    )
 
 
 def get_state_retries(client: ActivityWatchClient):
@@ -57,6 +59,16 @@ def main():
     parser.add_argument(
         "--length", type=float, default=5, help="The number of minutes you need to be away before reporting on it."
     )
+    parser.add_argument(
+        "--dialog-timeout",
+        type=float,
+        default=0,
+        help=(
+            "Auto-dismiss an unanswered check-in dialog after this many minutes, recording the "
+            "boundary as unlabeled. 0 disables the timeout; the dialog then waits forever, which "
+            "blocks the watcher's polling loop — avoid on unattended/agent desktops."
+        ),
+    )
     parser.add_argument("--testing", action="store_true", help="Run in testing mode.")
     parser.add_argument("--verbose", action="store_true", help="I want to see EVERYTHING!")
     args = parser.parse_args()
@@ -82,12 +94,24 @@ def main():
                 for event in state.get_new_afk_events_to_note(
                     seconds=args.depth * 60, durration_thresh=args.length * 60
                 ):
-                    if response := prompt(event, state.state.recent_events):
+                    response = prompt(event, state.state.recent_events, timeout_seconds=args.dialog_timeout * 60)
+                    if response:
                         logger.info(response)
                         state.post_event(event, response)
+                    elif args.dialog_timeout > 0:
+                        # Nobody answered (or the user dismissed). Keep the boundary as
+                        # unlabeled so prompt compliance is measurable, and so the same
+                        # gap is not asked about again.
+                        logger.info("Check-in dialog went unanswered; recorded boundary as unlabeled.")
+                        state.post_event(event, "", unlabeled=True)
                 time.sleep(args.frequency)
     except Exception as e:
-        messagebox.showerror("AW Watcher Ask Away: Error", f"An unhandled exception occurred: {e}")
+        # A modal error box blocks forever when nobody is at the display, so the
+        # service never exits and never restarts. In unattended mode log instead.
+        if args.dialog_timeout > 0:
+            logger.exception("Unhandled exception; exiting so the service can restart.")
+        else:
+            messagebox.showerror("AW Watcher Ask Away: Error", f"An unhandled exception occurred: {e}")
         raise
 
 
