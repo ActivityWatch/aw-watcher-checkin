@@ -77,8 +77,8 @@ class AWAskAwayClient:
     def _all_buckets(self):
         return self.client.get_buckets()
 
-    def post_event(self, event: aw_core.Event, message: str):
-        self.state.add_event(event, message)
+    def post_event(self, event: aw_core.Event, message: str, *, unlabeled: bool = False):
+        self.state.add_event(event, message, unlabeled=unlabeled)
         self.client.insert_event(self.bucket_id, event)
 
     def get_new_afk_events_to_note(self, seconds: float, durration_thresh: float):
@@ -134,9 +134,11 @@ class AWAskAwayState:
                 return True
         return False
 
-    def add_event(self, event: aw_core.Event, message: str):
+    def add_event(self, event: aw_core.Event, message: str, *, unlabeled: bool = False):
         assert not self.has_event(event)  # noqa: S101
         event.data[DATA_KEY] = message
+        if unlabeled:
+            event.data["unlabeled"] = True
         event["id"] = None  # Wipe the ID so we don't edit the AFK event.
         logger.debug(f"Posting event: {event}")
         self.recent_events.append(event)
