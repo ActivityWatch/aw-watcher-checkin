@@ -262,6 +262,19 @@ class AWAskAwayDialog(simpledialog.Dialog):
         self._schedule_timeout()
         super().wait_window(window)
 
+    # @override (when we get to 3.12)
+    def destroy(self):
+        """Cancel any pending auto-dismiss timer before tearing the dialog down.
+
+        Tk `after` timers are interpreter-level and outlive the widget, so an
+        answered/dismissed dialog would otherwise get a second `_timeout()` call
+        on a destroyed widget.
+        """
+        if self._timeout_id is not None:
+            self.after_cancel(self._timeout_id)
+            self._timeout_id = None
+        super().destroy()
+
     def _timeout(self):
         """Close the dialog unanswered.
 
@@ -269,7 +282,10 @@ class AWAskAwayDialog(simpledialog.Dialog):
         Deliberately skips cancel()'s 60 s sleep: the loop must resume polling.
         """
         self._timeout_id = None
+        if not self.winfo_exists():
+            return
         logger.debug("Check-in dialog timed out after %.0f s unanswered.", self.timeout_seconds)
+        self.result = None
         self.withdraw()
         self.destroy()
 
