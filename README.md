@@ -25,6 +25,48 @@ pipx install aw-watcher-ask-away
 
 ([Need to install `pipx` first?](https://pypa.github.io/pipx/installation/))
 
+## Experimental window boundaries
+
+The AFK-return watcher is unchanged by default. Two independent opt-in flags add
+boundaries from a window bucket on the **same device** as the AFK bucket:
+
+- `--category-switch`: the previous block lasted at least 15 minutes and the new
+  category has held for at least 2 minutes. Short detours stay in the old block.
+- `--long-block`: a block of at least 45 minutes closes at a sustained category
+  switch or a gap of at least 5 minutes. A gap is confirmed on return to activity.
+
+These are development flags. Daily caps, cooldowns, quiet hours and the rating
+form are still pending; keep the flags off for unattended use until those and
+[the dialog timeout](https://github.com/ActivityWatch/aw-watcher-checkin/pull/4) land.
+
+Both flags require `--window-bucket ID` and `--categories FILE`. The file is a
+JSON array in ActivityWatch's category format, for example:
+
+```json
+[
+  {"name": ["Work", "Coding"], "rule": {"regex": "vim|Code", "ignore_case": true}},
+  {"name": ["Communication"], "rule": {"regex": "Slack|Signal", "ignore_case": true}}
+]
+```
+
+Use your own category definitions. Classification uses ActivityWatch's existing
+engine over `app` and `title`; app changes alone are not category switches.
+Unmatched events belong to `Uncategorized`. Rules are loaded at startup.
+
+The finder intersects windows with non-AFK time and reads up to 24 hours of
+history, independently of `--depth` (how recently a boundary was confirmed).
+Incomplete blocks crossing that history boundary are skipped. It waits while
+AFK or when AFK telemetry is more than 60 seconds stale. The end of a polling
+query never closes a block. Adjacent same-category snapshots tolerate up to one
+second of heartbeat jitter; overlapping snapshots do not add duration twice.
+
+New events retain the block's timestamp/duration, clear the source ID and use
+`message` as before. They add `trigger`, `category` (a category path), and
+`closed_by` (`switch` or `gap`). If both rules match, `category_switch` wins and
+only one event is emitted. Persisted events use the original overlap dedupe on
+later polls and after restart. AFK-return events still describe the away interval,
+whereas window events describe the preceding active block.
+
 ## Roadmap
 
 Most of the improvements involve a more complicated pop-up window.

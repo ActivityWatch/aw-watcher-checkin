@@ -11,7 +11,10 @@ from typing import Any
 import aw_core
 import aw_transform
 from aw_client.client import ActivityWatchClient
+from aw_transform.classify import Rule, categorize
 from requests.exceptions import HTTPError
+
+from aw_watcher_ask_away.blocks import BlockTriggers, closed_blocks
 
 WATCHER_NAME = "aw-watcher-ask-away"
 LOCAL_TIMEZONE = datetime.datetime.now().astimezone().tzinfo
@@ -67,7 +70,7 @@ class AWAskAwayClient:
             # TODO: Look into why aw-watcher-afk uses queued=True here.
             client.create_bucket(self.bucket_id, event_type="afktask")
 
-        recent_events = deque(maxlen=10)
+        recent_events: deque[aw_core.Event] = deque(maxlen=10)
         recent_events.extend(aw_transform.sort_by_timestamp(client.get_events(self.bucket_id, limit=10)))
         self.state = AWAskAwayState(recent_events)
 
@@ -99,6 +102,46 @@ class AWAskAwayClient:
         except HTTPError:
             logger.exception("Failed to get events from the server.")
             return
+
+    def get_new_window_events_to_note(
+        self,
+        window_bucket: str,
+        categories: list[tuple[list[str], Rule]],
+        config: BlockTriggers,
+        seconds: float,
+        history: float = 86400,
+    ):
+        """Find recently confirmed boundaries using complete, time-bounded queries.
+
+        Category rules use ActivityWatch's existing classifier. The AFK and window
+        buckets must describe the same device. Default operation never calls this
+        method, so users without a window watcher retain the original behaviour.
+        """
+        if not (config.category_switch or config.long_block):
+            return
+        now = get_utc_now()
+        start = now - datetime.timedelta(seconds=history)
+        try:
+            afk = self.client.get_events(self.afk_bucket_id, start=start, end=now, limit=-1)
+            positive = [e for e in afk if e.duration.total_seconds() > 0]
+            if not positive:
+                return
+            latest = max(positive, key=lambda e: e.timestamp)
+            if is_afk(latest) or latest.timestamp + latest.duration < now - datetime.timedelta(seconds=60):
+                return
+            windows = self.client.get_events(window_bucket, start=start, end=now, limit=-1)
+            active = squash_overlaps([e for e in positive if not is_afk(e)])
+            windows = aw_transform.filter_period_intersect(windows, active)
+            windows = categorize(windows, categories)
+            for event, confirmed_at in closed_blocks(windows, config):
+                # Never report a block truncated at the history boundary or an
+                # old close merely rediscovered by a new polling request.
+                if event.timestamp <= start or not now - datetime.timedelta(seconds=seconds) < confirmed_at <= now:
+                    continue
+                if not self.state.has_event(event):
+                    yield event
+        except HTTPError:
+            logger.exception("Failed to get window events from the server.")
 
 
 class AWAskAwayState:
