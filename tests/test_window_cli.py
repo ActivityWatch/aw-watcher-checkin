@@ -70,13 +70,15 @@ def test_polling_loop_posts_window_block_only_when_enabled(monkeypatch, tmp_path
 
 
 def test_cli_help_does_not_require_tkinter():
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys, runpy; sys.modules['tkinter'] = None; "
-            "sys.argv = ['aw-watcher-ask-away', '--help']; "
-            "runpy.run_module('aw_watcher_ask_away', run_name='__main__')",
+            (
+                "import sys, runpy; sys.modules['tkinter'] = None; "
+                "sys.argv = ['aw-watcher-ask-away', '--help']; "
+                "runpy.run_module('aw_watcher_ask_away', run_name='__main__')"
+            ),
         ],
         capture_output=True,
         text=True,
