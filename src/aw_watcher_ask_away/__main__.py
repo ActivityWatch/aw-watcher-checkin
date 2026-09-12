@@ -1,15 +1,18 @@
-# ruff: noqa: EM101, EM102
+# ruff: noqa: EM101
 import argparse
+import json
 import time
 from collections.abc import Iterable
-from tkinter import messagebox
+from itertools import chain
+from pathlib import Path
 
 import aw_core
 from aw_client.client import ActivityWatchClient
 from aw_core.log import setup_logging
+from aw_transform.classify import Rule
 from requests.exceptions import ConnectionError
 
-import aw_watcher_ask_away.dialog as aw_dialog
+from aw_watcher_ask_away.blocks import BlockTriggers
 from aw_watcher_ask_away.core import (
     DATA_KEY,
     LOCAL_TIMEZONE,
@@ -21,11 +24,14 @@ from aw_watcher_ask_away.core import (
 
 
 def prompt(event: aw_core.Event, recent_events: Iterable[aw_core.Event], timeout_seconds: float = 0.0):
+    # The dialog creates a Tk root; CLI validation and --help need no display.
+    import aw_watcher_ask_away.dialog as aw_dialog  # noqa: PLC0415
+
     # TODO: Allow for customizing the prompt from the prompt interface.
     start_time_str = event.timestamp.astimezone(LOCAL_TIMEZONE).strftime("%I:%M")
     end_time_str = (event.timestamp + event.duration).astimezone(LOCAL_TIMEZONE).strftime("%I:%M")
     prompt = f"What were you doing from {start_time_str} - {end_time_str} ({event.duration.seconds / 60:.1f} minutes)?"
-    title = "AFK Checkin"
+    title = "Block Checkin" if event.data.get("trigger") else "AFK Checkin"
 
     return aw_dialog.ask_string(
         title, prompt, [event.data[DATA_KEY] for event in recent_events], timeout_seconds=timeout_seconds
@@ -71,7 +77,26 @@ def main():
     )
     parser.add_argument("--testing", action="store_true", help="Run in testing mode.")
     parser.add_argument("--verbose", action="store_true", help="I want to see EVERYTHING!")
+    parser.add_argument(
+        "--category-switch", action="store_true", help="Experimental: prompt after a sustained category switch."
+    )
+    parser.add_argument(
+        "--long-block", action="store_true", help="Experimental: prompt when a long window block closes."
+    )
+    parser.add_argument("--window-bucket", help="Window bucket on the same device as the AFK bucket.")
+    parser.add_argument("--categories", type=Path, help="JSON array of ActivityWatch category definitions (name/rule).")
     args = parser.parse_args()
+    triggers = BlockTriggers(category_switch=args.category_switch, long_block=args.long_block)
+    categories = []
+    if triggers.category_switch or triggers.long_block:
+        if not args.window_bucket or not args.categories:
+            parser.error("window triggers require --window-bucket and --categories")
+        with args.categories.open() as category_file:
+            categories = [
+                (c["name"], Rule({**c["rule"], "select_keys": ["app", "title"]})) for c in json.load(category_file)
+            ]
+        if not categories:
+            parser.error("--categories must contain at least one category")
 
     # Set up logging
     setup_logging(
@@ -91,8 +116,9 @@ def main():
             logger.info("Successfully connected to the server.")
 
             while True:
-                for event in state.get_new_afk_events_to_note(
-                    seconds=args.depth * 60, durration_thresh=args.length * 60
+                for event in chain(
+                    state.get_new_afk_events_to_note(seconds=args.depth * 60, durration_thresh=args.length * 60),
+                    state.get_new_window_events_to_note(args.window_bucket, categories, triggers, args.depth * 60),
                 ):
                     response = prompt(event, state.state.recent_events, timeout_seconds=args.dialog_timeout * 60)
                     if response:
@@ -111,6 +137,8 @@ def main():
         if args.dialog_timeout > 0:
             logger.exception("Unhandled exception; exiting so the service can restart.")
         else:
+            from tkinter import messagebox  # noqa: PLC0415
+
             messagebox.showerror("AW Watcher Ask Away: Error", f"An unhandled exception occurred: {e}")
         raise
 
