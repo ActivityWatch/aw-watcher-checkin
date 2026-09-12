@@ -126,7 +126,9 @@ class AWAskAwayClient:
             positive = [e for e in afk if e.duration.total_seconds() > 0]
             if not positive:
                 return
-            latest = max(positive, key=lambda e: e.timestamp)
+            # Conflicting statuses at the same timestamp cannot prove activity.
+            # Prefer AFK regardless of response order, avoiding an interruption.
+            latest = max(positive, key=lambda e: (e.timestamp, is_afk(e)))
             if is_afk(latest) or latest.timestamp + latest.duration < now - datetime.timedelta(seconds=60):
                 return
             windows = self.client.get_events(window_bucket, start=start, end=now, limit=-1)

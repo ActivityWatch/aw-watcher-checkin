@@ -56,14 +56,16 @@ Unmatched events belong to `Uncategorized`. Rules are loaded at startup.
 The finder intersects windows with non-AFK time and reads up to 24 hours of
 history, independently of `--depth` (how recently a boundary was confirmed).
 Incomplete blocks crossing that history boundary are skipped. It waits while
-AFK or when AFK telemetry is more than 60 seconds stale. The end of a polling
+AFK, when the latest status is contradictory, or when AFK telemetry is more than
+60 seconds stale. The end of a polling
 query never closes a block. Adjacent same-category snapshots tolerate up to one
 second of heartbeat jitter; overlapping snapshots do not add duration twice.
 
 New events retain the block's timestamp/duration, clear the source ID and use
 `message` as before. They add `trigger`, `category` (a category path), and
 `closed_by` (`switch` or `gap`). If both rules match, `category_switch` wins and
-only one event is emitted. Persisted events use the original overlap dedupe on
+only one event is emitted. A switch after a five-minute gap is an AFK/data-gap
+boundary, not a category-switch boundary. Persisted events use the original overlap dedupe on
 later polls and after restart. AFK-return events still describe the away interval,
 whereas window events describe the preceding active block.
 

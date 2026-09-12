@@ -168,3 +168,14 @@ def test_client_history_and_recency_boundaries(monkeypatch):
         monkeypatch, [window(-86400, 87300), window(900, 120, "Chat")], afk=[afk_event(-86400, 87420)]
     )
     assert poll(client, category_switch=True) == []
+
+
+def test_conflicting_latest_status_waits_independently_of_response_order(monkeypatch):
+    windows = [window(0, 900), window(900, 120, "Chat")]
+    statuses = [afk_event(1000, 20, "afk"), afk_event(1000, 20)]
+    for latest in (statuses, list(reversed(statuses))):
+        client, _ = client_for(monkeypatch, windows, [afk_event(0, 1000), *latest])
+        assert poll(client, category_switch=True) == []
+    # A later unambiguous active sample releases the boundary.
+    client, _ = client_for(monkeypatch, windows, [afk_event(0, 1000), *statuses, afk_event(1010, 10)])
+    assert len(poll(client, category_switch=True)) == 1
