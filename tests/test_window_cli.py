@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 
 import pytest
@@ -66,3 +67,20 @@ def test_polling_loop_posts_window_block_only_when_enabled(monkeypatch, tmp_path
         assert saved[0].data.get("unlabeled", False) == (response is None)
     else:
         assert not any(bucket == "window" for bucket, _ in transport.requests)
+
+
+def test_cli_help_does_not_require_tkinter():
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-c",
+            "import sys, runpy; sys.modules['tkinter'] = None; "
+            "sys.argv = ['aw-watcher-ask-away', '--help']; "
+            "runpy.run_module('aw_watcher_ask_away', run_name='__main__')",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--category-switch" in result.stdout

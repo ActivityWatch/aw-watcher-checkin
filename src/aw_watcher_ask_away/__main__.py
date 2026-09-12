@@ -5,7 +5,6 @@ import time
 from collections.abc import Iterable
 from itertools import chain
 from pathlib import Path
-from tkinter import messagebox
 
 import aw_core
 from aw_client.client import ActivityWatchClient
@@ -138,6 +137,8 @@ def main():
         if args.dialog_timeout > 0:
             logger.exception("Unhandled exception; exiting so the service can restart.")
         else:
+            from tkinter import messagebox  # noqa: PLC0415
+
             messagebox.showerror("AW Watcher Ask Away: Error", f"An unhandled exception occurred: {e}")
         raise
 
