@@ -21,6 +21,7 @@ from aw_watcher_ask_away.core import (
     AWWatcherAskAwayError,
     logger,
 )
+from aw_watcher_ask_away.selection import PromptSelector, SelectionPolicy
 
 
 def prompt(event: aw_core.Event, recent_events: Iterable[aw_core.Event], timeout_seconds: float = 0.0):
@@ -85,6 +86,28 @@ def main():
     )
     parser.add_argument("--window-bucket", help="Window bucket on the same device as the AFK bucket.")
     parser.add_argument("--categories", type=Path, help="JSON array of ActivityWatch category definitions (name/rule).")
+    parser.add_argument(
+        "--max-block-prompts",
+        type=int,
+        default=6,
+        help="Window-block check-ins allowed per waking day (AFK-return check-ins are not counted).",
+    )
+    parser.add_argument(
+        "--min-prompt-gap", type=float, default=45, help="Minimum minutes between two window-block check-ins."
+    )
+    parser.add_argument(
+        "--quiet-hours",
+        default="22-8",
+        help="Local hours START-END with no window-block check-ins; the waking day starts at END. Use 0-0 for none.",
+    )
+    parser.add_argument(
+        "--no-stratify",
+        action="store_true",
+        help=(
+            "Take the first qualifying blocks of the day instead of spreading check-ins across it. "
+            "Biases ratings toward the morning; meant for comparison only."
+        ),
+    )
     args = parser.parse_args()
     triggers = BlockTriggers(category_switch=args.category_switch, long_block=args.long_block)
     categories = []
@@ -97,6 +120,18 @@ def main():
             ]
         if not categories:
             parser.error("--categories must contain at least one category")
+    try:
+        quiet_start, quiet_end = (int(hour) for hour in args.quiet_hours.split("-"))
+        policy = SelectionPolicy(
+            max_per_day=args.max_block_prompts,
+            min_gap=args.min_prompt_gap * 60,
+            quiet_start=quiet_start,
+            quiet_end=quiet_end,
+            stratify=not args.no_stratify,
+        )
+    except ValueError as e:
+        parser.error(f"invalid check-in selection settings: {e}")
+    selector = PromptSelector(policy, LOCAL_TIMEZONE)
 
     # Set up logging
     setup_logging(
@@ -116,9 +151,12 @@ def main():
             logger.info("Successfully connected to the server.")
 
             while True:
+                block_events = state.get_new_window_events_to_note(
+                    args.window_bucket, categories, triggers, args.depth * 60
+                )
                 for event in chain(
                     state.get_new_afk_events_to_note(seconds=args.depth * 60, durration_thresh=args.length * 60),
-                    state.get_new_window_events_to_note(args.window_bucket, categories, triggers, args.depth * 60),
+                    (event for event in block_events if selector.admit(event)),
                 ):
                     response = prompt(event, state.state.recent_events, timeout_seconds=args.dialog_timeout * 60)
                     if response:
