@@ -1,3 +1,4 @@
+import datetime
 import json
 import subprocess
 import sys
@@ -20,14 +21,19 @@ def test_opt_in_requires_explicit_sources(monkeypatch, flag, capsys):
 
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("response", ["focused", None])
-def test_polling_loop_posts_window_block_only_when_enabled(monkeypatch, tmp_path, enabled, response):
+# The fixture block closes at 00:15 UTC: inside the default quiet hours (22-8).
+@pytest.mark.parametrize("quiet_hours", ["0-0", None])
+def test_polling_loop_posts_window_block_only_when_enabled(monkeypatch, tmp_path, enabled, response, quiet_hours):
     client, transport = client_for(monkeypatch, [window(0, 900), window(900, 120, "Chat")])
     rules = tmp_path / "categories.json"
     rules.write_text(json.dumps([{"name": [name], "rule": {"regex": name}} for name in ("Work", "Chat")]))
     args = ["aw-watcher-ask-away", "--dialog-timeout", "5"]
     if enabled:
         args += ["--category-switch", "--window-bucket", "window", "--categories", str(rules)]
+    if quiet_hours:
+        args += ["--quiet-hours", quiet_hours]
     monkeypatch.setattr(sys, "argv", args)
+    monkeypatch.setattr(cli, "LOCAL_TIMEZONE", datetime.UTC)
     monkeypatch.setattr(cli, "setup_logging", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "get_state_retries", lambda _: client)
     prompts = []
@@ -60,12 +66,12 @@ def test_polling_loop_posts_window_block_only_when_enabled(monkeypatch, tmp_path
     with pytest.raises(KeyboardInterrupt):
         cli.main()
     saved = transport.events[client.bucket_id]
-    assert len(saved) == len(prompts) == int(enabled)
-    if enabled:
+    assert len(saved) == len(prompts) == int(enabled and quiet_hours == "0-0")
+    if saved:
         assert saved[0].data["trigger"] == "category_switch"
         assert saved[0].data["message"] == (response or "")
         assert saved[0].data.get("unlabeled", False) == (response is None)
-    else:
+    if not enabled:
         assert not any(bucket == "window" for bucket, _ in transport.requests)
 
 
@@ -86,3 +92,12 @@ def test_cli_help_does_not_require_tkinter():
     )
     assert result.returncode == 0, result.stderr
     assert "--category-switch" in result.stdout
+
+
+@pytest.mark.parametrize("bad", [["--quiet-hours", "22"], ["--quiet-hours", "25-8"], ["--max-block-prompts", "0"]])
+def test_invalid_selection_settings_are_rejected(monkeypatch, bad, capsys):
+    monkeypatch.setattr(sys, "argv", ["aw-watcher-ask-away", *bad])
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 2
+    assert "invalid check-in selection settings" in capsys.readouterr().err

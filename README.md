@@ -35,9 +35,30 @@ boundaries from a window bucket on the **same device** as the AFK bucket:
 - `--long-block`: a block of at least 45 minutes closes at a sustained category
   switch or a gap of at least 5 minutes. A gap is confirmed on return to activity.
 
-These are development flags. Daily caps, cooldowns, quiet hours and the rating
-form are still pending; keep the flags off for unattended use until those and
+These are development flags. The rating form is still pending; keep the flags off
+for unattended use until it and
 [the dialog timeout](https://github.com/ActivityWatch/aw-watcher-checkin/pull/4) land.
+
+### Which blocks get a check-in
+
+A normal working day closes many more substantive blocks than anyone will rate,
+so window check-ins are limited. AFK-return check-ins are not limited, because
+they already arrive at a natural break.
+
+- `--max-block-prompts N` (default 6): at most N window check-ins per waking day.
+- `--min-prompt-gap MINUTES` (default 45): minimum spacing between two of them.
+- `--quiet-hours START-END` (default `22-8`, local time): no window check-ins in
+  this range. The waking day starts at END and may cross midnight. `0-0` disables it.
+
+The cap also needs a rule for which blocks to keep. Taking the first N of the day
+puts every check-in in the morning, so the afternoon and evening are never rated
+and the data skews toward fresher hours. Instead the waking day is split into N
+equal slots, and the first qualifying block in each slot gets the check-in
+(time-stratified sampling, the usual practice in experience-sampling studies).
+`--no-stratify` restores first-N, for comparison only.
+
+A block that was skipped stays skipped when a later poll finds it again. The
+counters live in memory, so a restart starts a fresh day's budget.
 
 Both flags require `--window-bucket ID` and `--categories FILE`. The file is a
 JSON array in ActivityWatch's category format, for example:
