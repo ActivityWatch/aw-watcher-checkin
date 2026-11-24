@@ -11,7 +11,7 @@ from typing import Any
 import aw_core
 import aw_transform
 from aw_client.client import ActivityWatchClient
-from requests.exceptions import HTTPError
+from requests.exceptions import RequestException
 
 WATCHER_NAME = "aw-watcher-ask-away"
 LOCAL_TIMEZONE = datetime.datetime.now().astimezone().tzinfo
@@ -27,7 +27,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def find_afk_bucket(buckets: dict[str, Any]):
+def find_afk_bucket(buckets: dict[str, Any], hostname: str | None = None):
+    # Prefer this host's bucket: a renamed host or synced buckets leave other afk buckets around.
+    if hostname is not None and (own := f"aw-watcher-afk_{hostname}") in buckets:
+        return own
     match [bucket for bucket in buckets if "afk" in bucket]:
         case []:
             raise AWWatcherAskAwayError("Cannot find the afk bucket.")
@@ -58,6 +61,14 @@ def get_gaps(events: list[aw_core.Event]):
             yield aw_core.Event(None, first_end, second.timestamp - first_end)
 
 
+def prompt_text(event: aw_core.Event) -> str:
+    # astimezone() with no argument uses the current local offset, so times stay right across DST.
+    start_time_str = event.timestamp.astimezone().strftime("%I:%M")
+    end_time_str = (event.timestamp + event.duration).astimezone().strftime("%I:%M")
+    minutes = event.duration.total_seconds() / 60
+    return f"What were you doing from {start_time_str} - {end_time_str} ({minutes:.1f} minutes)?"
+
+
 class AWAskAwayClient:
     def __init__(self, client: ActivityWatchClient):
         self.client = client
@@ -71,15 +82,22 @@ class AWAskAwayClient:
         recent_events.extend(aw_transform.sort_by_timestamp(client.get_events(self.bucket_id, limit=10)))
         self.state = AWAskAwayState(recent_events)
 
-        self.afk_bucket_id = find_afk_bucket(self._all_buckets)
+        self.afk_bucket_id = find_afk_bucket(self._all_buckets, self.client.client_hostname)
 
     @cached_property
     def _all_buckets(self):
         return self.client.get_buckets()
 
-    def post_event(self, event: aw_core.Event, message: str):
+    def post_event(self, event: aw_core.Event, message: str) -> bool:
+        """Store the answer on the server. Returns False (and forgets it locally) if the insert fails."""
         self.state.add_event(event, message)
-        self.client.insert_event(self.bucket_id, event)
+        try:
+            self.client.insert_event(self.bucket_id, event)
+        except RequestException:
+            logger.exception("Failed to save the event; the absence will be asked about again.")
+            self.state.recent_events.remove(event)
+            return False
+        return True
 
     def get_new_afk_events_to_note(self, seconds: float, durration_thresh: float):
         """Check whether we recently finished a large AFK event.
@@ -93,10 +111,10 @@ class AWAskAwayClient:
         """
         try:
             events = self.client.get_events(self.afk_bucket_id, limit=10)
-            if is_afk(events[0]):  # Currently AFK, wait to bring up the prompt.
+            if not events or is_afk(events[0]):  # Currently AFK, wait to bring up the prompt.
                 return
             yield from self.state.get_unseen_afk_events(events, seconds, durration_thresh)
-        except HTTPError:
+        except RequestException:
             logger.exception("Failed to get events from the server.")
             return
 
@@ -172,7 +190,7 @@ class AWAskAwayState:
         pseudo_afk_events = [e for e in pseudo_afk_events if not self.has_event(e)]
         buffered_now = get_utc_now() - datetime.timedelta(seconds=recency_thresh)
         for event in pseudo_afk_events:
-            long_enough = event.duration.seconds > durration_thresh
+            long_enough = event.duration.total_seconds() > durration_thresh
             recent_enough = event.timestamp + event.duration > buffered_now
             if long_enough and recent_enough:
                 logger.debug(f"Found event to note: {event}")

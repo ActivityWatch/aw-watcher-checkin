@@ -12,9 +12,9 @@ from requests.exceptions import ConnectionError
 import aw_watcher_ask_away.dialog as aw_dialog
 from aw_watcher_ask_away.core import (
     DATA_KEY,
-    LOCAL_TIMEZONE,
     WATCHER_NAME,
     AWAskAwayClient,
+    prompt_text,
     AWWatcherAskAwayError,
     logger,
 )
@@ -22,12 +22,8 @@ from aw_watcher_ask_away.core import (
 
 def prompt(event: aw_core.Event, recent_events: Iterable[aw_core.Event]):
     # TODO: Allow for customizing the prompt from the prompt interface.
-    start_time_str = event.timestamp.astimezone(LOCAL_TIMEZONE).strftime("%I:%M")
-    end_time_str = (event.timestamp + event.duration).astimezone(LOCAL_TIMEZONE).strftime("%I:%M")
-    prompt = f"What were you doing from {start_time_str} - {end_time_str} ({event.duration.seconds / 60:.1f} minutes)?"
     title = "AFK Checkin"
-
-    return aw_dialog.ask_string(title, prompt, [event.data[DATA_KEY] for event in recent_events])
+    return aw_dialog.ask_string(title, prompt_text(event), [event.data[DATA_KEY] for event in recent_events])
 
 
 def get_state_retries(client: ActivityWatchClient):
